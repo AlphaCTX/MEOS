@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  /* Rijkshuisstijl basiskleuren */
+  --rijk-lintblauw: #154273;
+  --rijk-hemelblauw: #007BC7;
+  --rijk-donkerblauw: #002855;
+  --rijk-goud: #E5A000;
+  --rijk-geel: #FFD100;
+  --rijk-grijs-1: #F3F5F8;
+  --rijk-grijs-2: #E6E6E6;
+  --rijk-grijs-3: #CCCCCC;
+  --rijk-grijs-6: #535353;
+  --rijk-antraciet: #1A1A1A;
+}
+
+html.light {
+  color-scheme: light;
+  background-color: #F3F5F8;
+  color: #1A202C;
+}
+
+html.dark {
+  color-scheme: dark;
+  background-color: #080E18;
+  color: #F1F5F9;
+}
+
+/* Print instellingen voor ambtelijke dossiers */
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+

@@ -1,0 +1,446 @@
+// ==============================================================================
+// MEOS / BVH INCIDENT & OBSERVATION LOGGING SYSTEM (MUTATION SYSTEM)
+// PRODUCTION PRISMA RELATIONAL DATABASE SCHEMA
+// ==============================================================================
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ------------------------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------------------------
+
+enum MutationStatus {
+  DRAFT
+  FINAL
+  AMENDED
+  ARCHIVED
+}
+
+enum PriorityLevel {
+  P1_CRITICAL    // Immediate officer/citizen danger, weapons, violent felonies
+  P2_URGENT      // Active suspect, immediate intervention required
+  P3_ROUTINE     // General observation, report filing, patrol logs
+  P4_INFO        // Background intelligence, community observation
+}
+
+enum IncidentCategory {
+  NARCOTICS_DRUGS
+  PUBLIC_ORDER_DISTURBANCE
+  TRAFFIC_VIOLATION_INCIDENT
+  VIOLENT_CRIME_ASSAULT
+  BURGLARY_THEFT
+  WEAPONS_FIREARMS
+  SUSPICIOUS_PERSON_ACTIVITY
+  DOMESTIC_INCIDENT
+  FRAUD_FINANCIAL
+  PROPERTY_DAMAGE_VANDALISM
+  ENVIRONMENTAL_HAZARD
+  OTHER_OBSERVATION
+}
+
+enum PersonRole {
+  SUSPECT
+  WITNESS
+  VICTIM
+  REPORTER
+  PERSON_OF_INTEREST
+  DRIVER
+  PASSENGER
+}
+
+enum VehicleRole {
+  TARGET_SUSPECT_VEHICLE
+  INVOLVED
+  STOLEN
+  FLEEING_VEHICLE
+  WITNESS_VEHICLE
+  RECOVERED
+  IMPOUNDED
+}
+
+enum EvidenceCategory {
+  FIREARMS_WEAPONS
+  NARCOTICS_CONTRABAND
+  STOLEN_PROPERTY
+  CASH_CURRENCY
+  ELECTRONICS_DIGITAL
+  DOCUMENTS_ID
+  VEHICLE_PARTS
+  OTHER_EVIDENCE
+}
+
+enum SeizureStatus {
+  SEIZED_CONFISCATED
+  SECURED_CHAIN_OF_CUSTODY
+  RETURNED_TO_OWNER
+  TRANSFERRED_TO_LAB
+  DISPOSED_DESTROYED
+  NOT_SEIZED_INSPECTED
+}
+
+enum UserRole {
+  ADMIN              // Full access, audit trail management, user provisioning
+  INVESTIGATOR       // Dossier exports, deep intelligence linking, amendments
+  PATROL_OFFICER     // Field logging, fast observation drafts, entity lookup
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  AMEND
+  STATUS_CHANGE
+  EXPORT
+  PRINT_DOSSIER
+  SEARCH
+  DELETE_ATTEMPT_DENIED
+}
+
+// ------------------------------------------------------------------------------
+// CORE MUTATION (LOG ENTRY)
+// ------------------------------------------------------------------------------
+
+model Mutation {
+  id               String            @id @default(uuid())
+  referenceNumber  String            @unique // Format: MUT-YYYYMMDD-XXXX
+  timestamp        DateTime          @default(now())
+  incidentDate     DateTime          @default(now())
+  category         IncidentCategory
+  priority         PriorityLevel     @default(P3_ROUTINE)
+  status           MutationStatus    @default(DRAFT)
+  
+  // Tactical Narrative & Summary
+  title            String            // Brief operational title (e.g. "Armed robbery observation at gas station")
+  narrativeSummary String            @db.Text // Full unedited officer observation / report
+  tacticalAction   String?           @db.Text // Actions taken by units on scene
+  outcomeNotes     String?           @db.Text // Outcome, arrests made, pending actions
+  
+  // Officer & Unit Metadata
+  unitId           String            // Unit designation (e.g., "UNIT-DELTA-04")
+  officerBadge     String            // Primary logging officer badge (e.g., "OF-8492")
+  officerName      String            // Officer full name
+  department       String            @default("Patrol Division 1")
+  district         String            // Tactical District (e.g. "District Centrum - Sector A")
+  
+  // Location
+  primaryAddress   String            // Formal street address
+  coordinatesLat   Float?            // GPS Latitude
+  coordinatesLng   Float?            // GPS Longitude
+  areaCode         String            // Postal code / Area grid
+  
+  // Superseding & Amendment Relations (Append-Only Lifecycle)
+  isAmended        Boolean           @default(false)
+  supersededById   String?           // Points to newer mutation version if amended
+  supersededBy     Mutation?         @relation("MutationAmends", fields: [supersededById], references: [id])
+  amendedVersions  Mutation[]        @relation("MutationAmends")
+  amendmentReason  String?           @db.Text
+  
+  // Relational Entity Links
+  persons          MutationPerson[]
+  vehicles         MutationVehicle[]
+  locations        MutationLocation[]
+  evidence         MutationEvidence[]
+  attachments      Attachment[]
+  auditLogs        AuditLog[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([referenceNumber])
+  @@index([category])
+  @@index([priority])
+  @@index([status])
+  @@index([unitId])
+  @@index([officerBadge])
+  @@index([timestamp])
+  @@index([district])
+}
+
+// ------------------------------------------------------------------------------
+// ENTITIES: PERSONS
+// ------------------------------------------------------------------------------
+
+model Person {
+  id               String            @id @default(uuid())
+  bsnNumber        String?           @unique // Citizen service number / Gov ID
+  firstName        String
+  lastName         String
+  alias            String?
+  dateOfBirth      DateTime?
+  gender           String?
+  nationality      String?           @default("NL")
+  address          String?
+  phoneNumber      String?
+  
+  // Caution Flags (Critical for Officer Safety)
+  cautionViolent   Boolean           @default(false) // Known violence toward officers
+  cautionWeapon    Boolean           @default(false) // Known firearm/knife carrier
+  cautionFlight    Boolean           @default(false) // High flight / escape risk
+  cautionMental    Boolean           @default(false) // Mental health / crisis alert
+  cautionDrugs     Boolean           @default(false) // Active narcotics dealer/user
+  cautionNotes     String?           @db.Text
+
+  photoUrl         String?
+  
+  // Relations
+  mutations        MutationPerson[]
+  auditLogs        AuditLog[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([lastName, firstName])
+  @@index([bsnNumber])
+  @@index([cautionViolent, cautionWeapon])
+}
+
+// Join Table: Mutation <-> Person (Many-to-Many with context)
+model MutationPerson {
+  id               String            @id @default(uuid())
+  mutationId       String
+  mutation         Mutation          @relation(fields: [mutationId], references: [id], onDelete: Cascade)
+  
+  personId         String
+  person           Person            @relation(fields: [personId], references: [id], onDelete: Restrict)
+  
+  role             PersonRole        @default(PERSON_OF_INTEREST)
+  statementSummary String?           @db.Text
+  isDetained       Boolean           @default(false)
+  cautionActive    Boolean           @default(false) // Caution alert triggered at scene
+
+  createdAt        DateTime          @default(now())
+
+  @@unique([mutationId, personId])
+  @@index([mutationId])
+  @@index([personId])
+  @@index([role])
+}
+
+// ------------------------------------------------------------------------------
+// ENTITIES: VEHICLES
+// ------------------------------------------------------------------------------
+
+model Vehicle {
+  id               String            @id @default(uuid())
+  licensePlate     String            @unique // Formatted plate e.g. "99-XX-ZZ"
+  make             String            // e.g. "Volkswagen"
+  model            String            // e.g. "Golf GTI"
+  color            String            // e.g. "Midnight Black"
+  year             Int?
+  vin              String?           @unique
+  vehicleType      String?           @default("Passenger Car")
+  
+  // APB / Flags
+  isStolen         Boolean           @default(false)
+  isWanted         Boolean           @default(false)
+  stolenReportRef  String?
+  remarks          String?           @db.Text
+
+  // Relations
+  mutations        MutationVehicle[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([licensePlate])
+  @@index([isStolen])
+  @@index([make, model])
+}
+
+// Join Table: Mutation <-> Vehicle (Many-to-Many with incident role)
+model MutationVehicle {
+  id               String            @id @default(uuid())
+  mutationId       String
+  mutation         Mutation          @relation(fields: [mutationId], references: [id], onDelete: Cascade)
+  
+  vehicleId        String
+  vehicle          Vehicle           @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  
+  role             VehicleRole       @default(INVOLVED)
+  damageNotes      String?
+  isImpounded      Boolean           @default(false)
+  driverPersonId   String?           // Optional link to person driving
+  
+  createdAt        DateTime          @default(now())
+
+  @@unique([mutationId, vehicleId])
+  @@index([mutationId])
+  @@index([vehicleId])
+  @@index([role])
+}
+
+// ------------------------------------------------------------------------------
+// ENTITIES: LOCATIONS
+// ------------------------------------------------------------------------------
+
+model Location {
+  id               String            @id @default(uuid())
+  formalAddress    String
+  street           String
+  houseNumber      String?
+  city             String            @default("Amsterdam")
+  postalCode       String
+  areaDistrict     String            // Sector/District ID
+  coordinatesLat   Float?
+  coordinatesLng   Float?
+  buildingDetails  String?           // e.g., "Apartment 3B, 2nd floor, buzzer code 124"
+  knownHotspot     Boolean           @default(false)
+
+  mutations        MutationLocation[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([formalAddress])
+  @@index([postalCode])
+  @@index([areaDistrict])
+}
+
+model MutationLocation {
+  id               String            @id @default(uuid())
+  mutationId       String
+  mutation         Mutation          @relation(fields: [mutationId], references: [id], onDelete: Cascade)
+  
+  locationId       String
+  location         Location          @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  
+  isPrimary        Boolean           @default(true)
+  locationNotes    String?
+
+  createdAt        DateTime          @default(now())
+
+  @@unique([mutationId, locationId])
+  @@index([mutationId])
+  @@index([locationId])
+}
+
+// ------------------------------------------------------------------------------
+// ENTITIES: GOODS & EVIDENCE
+// ------------------------------------------------------------------------------
+
+model GoodsEvidence {
+  id                 String            @id @default(uuid())
+  itemNumber         String            @unique // EV-YYYY-XXXX
+  category           EvidenceCategory
+  description        String
+  serialNumber       String?
+  brand              String?
+  estimatedValue     Float?
+  seizureStatus      SeizureStatus     @default(SEIZED_CONFISCATED)
+  storageLocker      String?           // E.g., "Locker B-14, Vault Centrum"
+  chainOfCustodyLogs String?           @db.Text
+
+  mutations          MutationEvidence[]
+
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([itemNumber])
+  @@index([serialNumber])
+  @@index([category])
+  @@index([seizureStatus])
+}
+
+model MutationEvidence {
+  id               String            @id @default(uuid())
+  mutationId       String
+  mutation         Mutation          @relation(fields: [mutationId], references: [id], onDelete: Cascade)
+  
+  evidenceId       String
+  evidence         GoodsEvidence     @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+  
+  seizedByBadge    String
+  seizureLocation  String?
+  notes            String?
+
+  createdAt        DateTime          @default(now())
+
+  @@unique([mutationId, evidenceId])
+  @@index([mutationId])
+  @@index([evidenceId])
+}
+
+// ------------------------------------------------------------------------------
+// ATTACHMENTS & PHOTOS (FIELD EVIDENCE)
+// ------------------------------------------------------------------------------
+
+model Attachment {
+  id               String            @id @default(uuid())
+  mutationId       String
+  mutation         Mutation          @relation(fields: [mutationId], references: [id], onDelete: Cascade)
+  
+  fileName         String
+  fileType         String            // image/jpeg, application/pdf, etc.
+  fileSize         Int               // in bytes
+  url              String
+  caption          String?
+  uploadedByBadge  String
+  sha256Hash       String?           // For integrity verification
+
+  createdAt        DateTime          @default(now())
+
+  @@index([mutationId])
+}
+
+// ------------------------------------------------------------------------------
+// IMMUTABLE AUDIT LOG (APPEND-ONLY, NO DELETIONS ALLOWED)
+// ------------------------------------------------------------------------------
+
+model AuditLog {
+  id               String            @id @default(uuid())
+  action           AuditAction
+  targetMutationId String?
+  mutation         Mutation?         @relation(fields: [targetMutationId], references: [id], onDelete: SetNull)
+  
+  targetPersonId   String?
+  person           Person?           @relation(fields: [targetPersonId], references: [id], onDelete: SetNull)
+
+  // Security Context
+  userId           String            // Officer ID / User ID (e.g. "OF-8492")
+  userName         String            // Officer Name
+  userRole         UserRole          @default(PATROL_OFFICER)
+  ipAddress        String            @default("127.0.0.1")
+  userAgent        String?
+  
+  // Detailed Audit Snapshot
+  justification    String?           @db.Text // Reason required for Read/Export/Amend
+  diffJson         String?           @db.Text // JSON string of modified fields
+  metadata         String?           @db.Text // Context parameters (e.g. search query)
+
+  timestamp        DateTime          @default(now())
+
+  @@index([targetMutationId])
+  @@index([userId])
+  @@index([action])
+  @@index([timestamp])
+}
+
+// ------------------------------------------------------------------------------
+// USERS & RBAC PROFILES
+// ------------------------------------------------------------------------------
+
+model User {
+  id               String            @id @default(uuid())
+  badgeNumber      String            @unique // e.g. "OF-8492"
+  name             String
+  rank             String            // Chief Inspector, Senior Detective, Patrol Officer
+  role             UserRole          @default(PATROL_OFFICER)
+  department       String            // Division
+  activeUnit       String?           // "UNIT-DELTA-04"
+  email            String            @unique
+  isActive         Boolean           @default(true)
+  lastLoginAt      DateTime?
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([badgeNumber])
+  @@index([role])
+}

@@ -1,0 +1,6 @@
+{
+  "name": "MEOS - Incident & Observation Logging System",
+  "description": "Law enforcement incident and observation logging (mutation) system with relational entity tracking, caution alerts, immutable audit trails, and RBAC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
