@@ -89,15 +89,44 @@ export const MutationDetail: React.FC<MutationDetailProps> = ({
 
   
   const [isEmailing, setIsEmailing] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailRecipient, setEmailRecipient] = useState(currentOfficer?.email || '');
+  const [emailStatus, setEmailStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const handleEmailPdf = async () => {
+  const handleOpenEmailModal = () => {
+    setEmailRecipient(currentOfficer?.email || '');
+    setEmailStatus(null);
+    setShowEmailModal(true);
+  };
+
+  const handleSendEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailRecipient || !emailRecipient.includes('@')) {
+      setEmailStatus({
+        type: 'error',
+        message: 'Voer een geldig e-mailadres in om het dossier naar toe te sturen.',
+      });
+      return;
+    }
+
     try {
       setIsEmailing(true);
+      setEmailStatus(null);
       const pdfBase64 = PdfService.generateMutationPdf(mutation, true) as string;
-      await ApiService.emailDossier(mutation.id, pdfBase64);
-      alert('PDF is succesvol naar uw e-mail verzonden.');
+      const res = await ApiService.emailDossier(mutation.id, pdfBase64, emailRecipient);
+      setEmailStatus({
+        type: 'success',
+        message: res.message || `Dossier ${mutation.referenceNumber} is succesvol verzonden naar ${emailRecipient}.`,
+      });
+      setTimeout(() => {
+        setShowEmailModal(false);
+        setEmailStatus(null);
+      }, 2500);
     } catch (e: any) {
-      alert(e.message || 'Fout bij verzenden e-mail');
+      setEmailStatus({
+        type: 'error',
+        message: e.message || 'Fout bij verzenden van de e-mail via de mailserver.',
+      });
     } finally {
       setIsEmailing(false);
     }
@@ -164,14 +193,11 @@ export const MutationDetail: React.FC<MutationDetailProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           
           <button
-            onClick={handleEmailPdf}
-            disabled={isEmailing}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold shadow transition flex items-center gap-1.5 cursor-pointer ${
-              isEmailing ? 'bg-indigo-600/50 text-white/70' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-            }`}
+            onClick={handleOpenEmailModal}
+            className="px-3.5 py-1.5 rounded-lg text-xs font-bold shadow transition flex items-center gap-1.5 cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white"
           >
             <Mail className="w-4 h-4" />
-            <span>{isEmailing ? 'Bezig met verzenden...' : 'Mail PDF'}</span>
+            <span>Mail PDF</span>
           </button>
 
           {/* Direct PDF Download */}
@@ -656,6 +682,100 @@ export const MutationDetail: React.FC<MutationDetailProps> = ({
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl shadow cursor-pointer disabled:opacity-50"
                 >
                   {amendLoading ? 'Vastleggen...' : 'Ambtelijk Vastleggen in MEOS'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Email PDF Modal */}
+      {showEmailModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0e1726] border border-[#1e334d] text-zinc-100 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-zinc-100">Dossier Mailen per PDF</h3>
+                  <p className="text-xs text-zinc-400">Verzend ambtelijke PDF-uitdraai van {mutation.referenceNumber}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowEmailModal(false)}
+                className="text-zinc-400 hover:text-zinc-200 text-xs px-2 py-1 rounded cursor-pointer"
+              >
+                Sluiten
+              </button>
+            </div>
+
+            {emailStatus && (
+              <div
+                className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                  emailStatus.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+                    : 'bg-red-500/10 border border-red-500/30 text-red-400'
+                }`}
+              >
+                {emailStatus.type === 'success' ? (
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{emailStatus.message}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSendEmail} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1.5">
+                  Bestemming E-mailadres *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={emailRecipient}
+                  onChange={(e) => setEmailRecipient(e.target.value)}
+                  placeholder="naam@marechaussee.nl"
+                  className="w-full bg-[#08101d] border border-[#1e334d] rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-indigo-500"
+                />
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  Standaard ingevuld met uw account e-mail. U kunt dit adres hier naar wens aanpassen.
+                </p>
+              </div>
+
+              <div className="bg-[#08101d] border border-[#1e334d] p-3 rounded-xl text-xs space-y-1.5 text-zinc-300">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Onderwerp:</span>
+                  <span className="font-mono text-zinc-200">Dossier: {mutation.referenceNumber}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Bijlage:</span>
+                  <span className="font-mono text-zinc-200">MEOS-{mutation.referenceNumber}.pdf</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Verbalisant:</span>
+                  <span className="text-zinc-200">{currentOfficer?.name || mutation.officerName}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEmailModal(false)}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium cursor-pointer"
+                >
+                  Annuleren
+                </button>
+                <button
+                  type="submit"
+                  disabled={isEmailing}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs shadow flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Mail className="w-4 h-4" />
+                  <span>{isEmailing ? 'Verzenden...' : 'Verstuur PDF per Mail'}</span>
                 </button>
               </div>
             </form>

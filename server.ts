@@ -61,6 +61,45 @@ async function startServer() {
   });
 
   // ----------------------------------------------------------------------------
+  // USER PROFILE SELF-MANAGEMENT
+  // ----------------------------------------------------------------------------
+  app.get('/api/user/profile', (req: Request, res: Response) => {
+    try {
+      const userCtx = getOfficerContext(req);
+      const user = db.getUserByBadgeOrUsername(userCtx.userId);
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'Gebruikersprofiel niet gevonden' });
+      }
+      res.json({ success: true, data: user });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/user/profile', (req: Request, res: Response) => {
+    try {
+      const userCtx = getOfficerContext(req);
+      const { email, name, department, currentPassword, newPassword } = req.body;
+
+      const updatedSession = db.updateUserProfile(userCtx.userId, {
+        email,
+        name,
+        department,
+        currentPassword,
+        newPassword,
+      });
+
+      res.json({
+        success: true,
+        message: 'Profiel succesvol bijgewerkt',
+        data: updatedSession,
+      });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || 'Fout bij bijwerken profiel' });
+    }
+  });
+
+  // ----------------------------------------------------------------------------
   // ADMIN MANAGEMENT (GEBRUIKERSBEHEER, BRIGADES & AUTORISATIEMATRIX)
   // ----------------------------------------------------------------------------
   app.get('/api/admin/users', (_req: Request, res: Response) => {
@@ -71,7 +110,7 @@ async function startServer() {
   app.post('/api/admin/users', (req: Request, res: Response) => {
     try {
       const userCtx = getOfficerContext(req);
-      const { username, password, badgeNumber, name, rank, role, department, activeBrigade, activeUnit } = req.body;
+      const { username, password, email, badgeNumber, name, rank, role, department, activeBrigade, activeUnit } = req.body;
       
       if (!username || !badgeNumber || !name) {
         return res.status(400).json({
@@ -84,6 +123,7 @@ async function startServer() {
         {
           username,
           password: password || 'KMar2026!',
+          email,
           badgeNumber,
           name,
           rank: rank || 'Wachtmeester',
@@ -531,12 +571,11 @@ async function startServer() {
   // ----------------------------------------------------------------------------
   app.get('/api/stats', (req: Request, res: Response) => {
     const badgeNumber = req.header('x-user-badge');
-    let userBrigade = undefined;
+    let userBrigade: string | undefined = undefined;
     if (badgeNumber) {
-      const users = Array.from((db as any).users.values());
-      const user = users.find(u => u.badgeNumber === badgeNumber);
+      const user = db.getUserByBadgeOrUsername(badgeNumber);
       if (user) {
-        userBrigade = user.activeBrigade;
+        userBrigade = user.activeBrigade || user.activeUnit;
       }
     }
     const stats = db.getStats(badgeNumber, userBrigade);
@@ -681,20 +720,21 @@ async function startServer() {
   });
 
   // Export Dossier to PDF/Printable PV & log audit
-  
   app.post('/api/mutations/:id/email', async (req: Request, res: Response): Promise<void> => {
     try {
       const userCtx = getOfficerContext(req);
-      const allUsers = (db as any).getAdminUsers ? (db as any).getAdminUsers() : (db as any).users ? Array.from((db as any).users.values()) : [];
-      const user = allUsers.find((u: any) => u.username === userCtx.userId);
-      const recipient = user?.email || req.body.email;
+      const user = db.getUserByBadgeOrUsername(userCtx.userId) || db.getUserByBadgeOrUsername(req.headers['x-user-badge'] as string);
+      const recipient = req.body.email || user?.email;
       
-      if (!recipient) {
-        res.status(400).json({ success: false, error: 'Geen e-mailadres gevonden. Stel dit in via uw profiel.' });
+      if (!recipient || recipient.trim().length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'Geen e-mailadres geconfigureerd voor uw account. Voeg uw e-mailadres toe via "Mijn Profiel" of beheer dit in het Gebruikersbeheer.',
+        });
         return;
       }
 
-      const mutation = (db as any).mutations ? (db as any).mutations.find((m: any) => m.id === req.params.id) : null;
+      const mutation = db.getMutationById(req.params.id);
       if (!mutation) {
         res.status(404).json({ success: false, error: 'Mutatie niet gevonden' });
         return;
@@ -702,7 +742,10 @@ async function startServer() {
 
       const smtp = db.getSmtpSettings();
       if (!smtp || !smtp.host) {
-        res.status(400).json({ success: false, error: 'Mailserver is niet geconfigureerd in admin panel' });
+        res.status(400).json({
+          success: false,
+          error: 'Mailserver (SMTP) is niet geconfigureerd. Configureer de SMTP host en poort onder Systeembeheer > SMTP / Mailserver.',
+        });
         return;
       }
 
@@ -712,42 +755,52 @@ async function startServer() {
         secure: parseInt(smtp.port) === 465,
         auth: {
           user: smtp.user,
-          pass: smtp.pass
+          pass: smtp.pass,
         },
         tls: {
-          rejectUnauthorized: false
-        }
+          rejectUnauthorized: false,
+        },
       });
 
-      const pdfBase64 = req.body.pdfData.includes('base64,') ? req.body.pdfData.split('base64,')[1] : req.body.pdfData;
+      const pdfBase64 = (req.body.pdfData || '').includes('base64,')
+        ? req.body.pdfData.split('base64,')[1]
+        : req.body.pdfData || '';
       
       await transporter.sendMail({
-        from: `"${smtp.fromName}" <${smtp.fromEmail}>`,
+        from: `"${smtp.fromName || 'MEOS Systeem'}" <${smtp.fromEmail || 'noreply@marechaussee.nl'}>`,
         to: recipient,
-        subject: `Dossier: ${mutation.referenceNumber} - MEOS Systeem`,
-        text: `Beste ${userCtx.userName},\n\nBijgaand ontvangt u de PDF-uitdraai van dossier ${mutation.referenceNumber}.\n\nMet vriendelijke groet,\nMEOS Digitaal Mutatiesysteem`,
-        attachments: [
+        subject: `Dossier: ${mutation.referenceNumber} - MEOS Koninklijke Marechaussee`,
+        text: `Beste ${userCtx.userName},\n\nBijgaand ontvangt u de ambtelijke PDF-uitdraai van dossier ${mutation.referenceNumber} (${mutation.mutationType}).\n\nReferentienummer: ${mutation.referenceNumber}\nLocatie: ${mutation.primaryAddress}\nDatum/Tijd: ${new Date(mutation.incidentDate || mutation.timestamp).toLocaleString('nl-NL')}\n\nMet vriendelijke groet,\nMEOS Digitaal Mutatiesysteem\nKoninklijke Marechaussee`,
+        attachments: pdfBase64 ? [
           {
             filename: `MEOS-${mutation.referenceNumber}.pdf`,
             content: pdfBase64,
-            encoding: 'base64'
-          }
-        ]
+            encoding: 'base64',
+          },
+        ] : [],
       });
       
       // Log audit
-      (db as any).logAudit({
+      db.logAudit({
         action: 'EXPORT_PDF',
         userId: userCtx.userId,
         userName: userCtx.userName,
         userRole: userCtx.userRole,
-        metadata: `PDF per e-mail verzonden naar ${recipient}`
+        targetMutationId: mutation.id,
+        justification: `Dossier PDF per e-mail verzonden naar ${recipient}`,
+        metadata: `E-mail verzending dossier ${mutation.referenceNumber} naar ${recipient}`,
       });
 
-      res.json({ success: true, message: 'E-mail succesvol verzonden' });
+      res.json({
+        success: true,
+        message: `Dossier ${mutation.referenceNumber} is succesvol per e-mail verzonden naar ${recipient}.`,
+      });
     } catch(err: any) {
       console.error('Email error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Fout bij verzenden email' });
+      res.status(500).json({
+        success: false,
+        error: err.message || 'Fout bij verzenden van e-mail via de geconfigureerde mailserver.',
+      });
     }
   });
 

@@ -73,6 +73,7 @@ export type AuditAction =
   | 'AMEND'
   | 'STATUS_CHANGE'
   | 'EXPORT'
+  | 'EXPORT_PDF'
   | 'PRINT_DOSSIER'
   | 'SEARCH'
   | 'LOGIN'

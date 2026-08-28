@@ -311,7 +311,6 @@ export const Header: React.FC<HeaderProps> = ({ session, activeTab, setActiveTab
             <button
               onClick={() => {
                 ApiService.logout();
-                setCurrentSession(null);
                 if (onAuthChange) onAuthChange(null);
                 setIsMobileMenuOpen(false);
               }}

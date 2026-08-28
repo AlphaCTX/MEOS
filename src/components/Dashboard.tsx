@@ -40,8 +40,7 @@ interface DashboardProps {
   onCreateNew: () => void;
 }
 
-const typeMap: Record<MutationType,
-  UserSession, string> = {
+const typeMap: Record<MutationType, string> = {
   VRIJE_MUTATIE: 'Vrije mutatie',
   KLADMUTATIE: 'Kladmutatie',
   INFORMATIERAPPORT: 'Informatierapport (ID)',

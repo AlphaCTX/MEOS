@@ -212,6 +212,7 @@ function MainApp() {
             currentUser={currentOfficer}
             onSelectMutation={handleSelectMutation}
             onCreateNew={() => setActiveTab('wizard')}
+            onProfileUpdated={setCurrentOfficer}
           />
         ) : activeTab === 'entities' ? (
           <EntityRegistry onSelectMutation={handleSelectMutation} />

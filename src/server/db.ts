@@ -655,6 +655,7 @@ class LawEnforcementDatabase {
       passwordHash: 'Stormpie1!',
       badgeNumber: 'ADM-01',
       name: 'Systeembeheerder AlphaCTX',
+      email: 'alphactx@marechaussee.nl',
       rank: 'Luitenant-kolonel',
       role: 'ADMIN',
       department: 'Korpsstaf & MEOS Systeembeheer',
@@ -664,19 +665,43 @@ class LawEnforcementDatabase {
     });
   }
 
-    public authenticate(usernameInput: string, passwordInput: string): UserSession | null {
+  public getUserByBadgeOrUsername(identifier: string): UserAccount | null {
+    if (!identifier) return null;
+    const clean = identifier.trim().toLowerCase();
+    
+    // Direct username lookup
+    if (this.users.has(clean)) {
+      return this.users.get(clean)!;
+    }
+    
+    // Lookup by badgeNumber or username (case-insensitive)
+    for (const u of this.users.values()) {
+      if (
+        u.username.toLowerCase() === clean ||
+        u.badgeNumber.toLowerCase() === clean
+      ) {
+        return u;
+      }
+    }
+    return null;
+  }
+
+  public authenticate(usernameInput: string, passwordInput: string): UserSession | null {
     const user = this.users.get(usernameInput.toLowerCase());
     
     // Default system admin bypass for alphactx
     if (usernameInput.toLowerCase() === 'alphactx' && passwordInput === 'Stormpie1!') {
+      const alphaUser = this.users.get('alphactx');
       return {
         username: 'AlphaCTX',
         badgeNumber: 'ADM-01',
-        name: 'Systeembeheerder AlphaCTX',
-        rank: 'Hoofdinspecteur / Admin',
+        name: alphaUser?.name || 'Systeembeheerder AlphaCTX',
+        rank: alphaUser?.rank || 'Luitenant-kolonel',
         role: 'ADMIN',
-        department: 'Korpsleiding & Systeembeheer',
-        activeUnit: 'HQ-COMMAND',
+        department: alphaUser?.department || 'Korpsleiding & Systeembeheer',
+        activeBrigade: alphaUser?.activeBrigade || 'BRIGADE-HQ-COMMAND',
+        activeUnit: alphaUser?.activeUnit || 'BRIGADE-HQ-COMMAND',
+        email: alphaUser?.email || 'alphactx@marechaussee.nl',
         isAdmin: true,
         permissions: PERMISSION_DEFINITIONS.map(d => d.key)
       };
@@ -701,6 +726,7 @@ class LawEnforcementDatabase {
         rank: user.rank,
         role: user.role,
         department: user.department,
+        email: user.email,
         activeBrigade: user.activeBrigade,
         activeUnit: user.activeUnit || user.activeBrigade,
         isAdmin: user.role === 'ADMIN',
@@ -730,6 +756,74 @@ class LawEnforcementDatabase {
     };
   }
 
+  public updateUserProfile(
+    identifier: string,
+    profileData: {
+      email?: string;
+      name?: string;
+      department?: string;
+      currentPassword?: string;
+      newPassword?: string;
+    }
+  ): UserSession {
+    const user = this.getUserByBadgeOrUsername(identifier);
+    if (!user) {
+      throw new Error(`Gebruikersaccount niet gevonden voor ID "${identifier}".`);
+    }
+
+    // Password change validation if requested
+    if (profileData.newPassword && profileData.newPassword.trim().length > 0) {
+      if (!profileData.currentPassword) {
+        throw new Error('Huidig wachtwoord is verplicht om een nieuw wachtwoord in te stellen.');
+      }
+      if (user.passwordHash !== profileData.currentPassword) {
+        throw new Error('Het huidige wachtwoord is onjuist.');
+      }
+      if (profileData.newPassword.length < 6) {
+        throw new Error('Het nieuwe wachtwoord moet minimaal 6 tekens lang zijn.');
+      }
+      user.passwordHash = profileData.newPassword;
+    }
+
+    if (profileData.email !== undefined) {
+      user.email = profileData.email.trim();
+    }
+    if (profileData.name && profileData.name.trim().length > 0) {
+      user.name = profileData.name.trim();
+    }
+    if (profileData.department && profileData.department.trim().length > 0) {
+      user.department = profileData.department.trim();
+    }
+
+    const key = user.username.toLowerCase();
+    this.users.set(key, user);
+
+    this.logAudit({
+      action: 'USER_UPDATE',
+      userId: user.badgeNumber || user.username,
+      userName: user.name,
+      userRole: user.role,
+      justification: `Eigen profielgegevens bijgewerkt door verbalisant ${user.name} (${user.badgeNumber}). E-mail: ${user.email || 'Niet ingesteld'}`,
+    });
+
+    const rolePerms = this.rolePermissions[user.role] || {};
+    const activePerms = Object.entries(rolePerms).filter(([_, val]) => val).map(([k, _]) => k);
+
+    return {
+      username: user.username,
+      badgeNumber: user.badgeNumber,
+      name: user.name,
+      rank: user.rank,
+      role: user.role,
+      department: user.department,
+      email: user.email,
+      activeBrigade: user.activeBrigade,
+      activeUnit: user.activeUnit || user.activeBrigade,
+      isAdmin: user.role === 'ADMIN',
+      permissions: user.role === 'ADMIN' ? PERMISSION_DEFINITIONS.map(d => d.key) : activePerms
+    };
+  }
+
   public createUser(
     userData: {
       username: string;
@@ -737,7 +831,7 @@ class LawEnforcementDatabase {
       badgeNumber: string;
       name: string;
       rank: string;
-  email?: string;
+      email?: string;
       role: UserRole;
       department: string;
       activeBrigade?: string;
@@ -755,6 +849,7 @@ class LawEnforcementDatabase {
     const newUser: UserAccount = {
       username: userData.username.trim(),
       passwordHash: userData.password || 'KMar2026!',
+      email: userData.email ? userData.email.trim() : undefined,
       badgeNumber: userData.badgeNumber.trim(),
       name: userData.name.trim(),
       rank: userData.rank.trim() || 'Wachtmeester',
@@ -772,7 +867,7 @@ class LawEnforcementDatabase {
       userId: adminContext.userId,
       userName: adminContext.userName,
       userRole: adminContext.userRole,
-      justification: `Nieuw KMar profiel aangemaakt: ${newUser.name} (${newUser.badgeNumber}), Rang: ${newUser.rank}, Brigade: ${newUser.activeBrigade}`,
+      justification: `Nieuw KMar profiel aangemaakt: ${newUser.name} (${newUser.badgeNumber}), Rang: ${newUser.rank}, Brigade: ${newUser.activeBrigade}, E-mail: ${newUser.email || 'Geen'}`,
     });
 
     return { ...newUser, passwordHash: '••••••••' };
@@ -796,6 +891,7 @@ class LawEnforcementDatabase {
       name: updateData.name ? updateData.name.trim() : existing.name,
       badgeNumber: updateData.badgeNumber ? updateData.badgeNumber.trim() : existing.badgeNumber,
       rank: updateData.rank ? updateData.rank.trim() : existing.rank,
+      email: updateData.email !== undefined ? (updateData.email ? updateData.email.trim() : undefined) : existing.email,
       role: updateData.role || existing.role,
       department: updateData.department ? updateData.department.trim() : existing.department,
       activeBrigade: brigadeVal,
@@ -811,7 +907,7 @@ class LawEnforcementDatabase {
       userId: adminContext.userId,
       userName: adminContext.userName,
       userRole: adminContext.userRole,
-      justification: `KMar profiel bijgewerkt: ${updated.name} (${updated.badgeNumber}), Rang: ${updated.rank}, Brigade: ${updated.activeBrigade}`,
+      justification: `KMar profiel bijgewerkt: ${updated.name} (${updated.badgeNumber}), Rang: ${updated.rank}, Brigade: ${updated.activeBrigade}, E-mail: ${updated.email || 'Geen'}`,
     });
 
     return { ...updated, passwordHash: '••••••••' };
@@ -1571,10 +1667,10 @@ class LawEnforcementDatabase {
     let brigadeMutationsCount = 0;
     
     if (userBadge) {
-      myMutationsCount = list.filter(m => m.authorBadge === userBadge).length;
+      myMutationsCount = list.filter(m => m.officerBadge === userBadge || (m.assistingOfficers && m.assistingOfficers.some((a: any) => a.badgeNumber === userBadge))).length;
     }
     if (userBrigade) {
-      brigadeMutationsCount = list.filter(m => m.authorBrigade === userBrigade).length;
+      brigadeMutationsCount = list.filter(m => (m as any).activeBrigade === userBrigade || (m as any).brigadeCode === userBrigade || (m as any).authorBrigade === userBrigade).length;
     }
 
     return {

@@ -328,8 +328,15 @@ export const UserManager: React.FC = () => {
                           <div className={`font-bold ${isLight ? 'text-slate-900' : 'text-zinc-100'}`}>
                             {u.name}
                           </div>
-                          <div className={`text-[11px] font-mono opacity-60 ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
-                            @{u.username}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[11px] font-mono opacity-60 ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
+                              @{u.username}
+                            </span>
+                            {u.email && (
+                              <span className="text-[11px] text-blue-500 dark:text-blue-400 flex items-center gap-1 font-sans">
+                                • {u.email}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -496,6 +503,21 @@ export const UserManager: React.FC = () => {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Wmr. I J. van den Berg"
+                  className={`w-full border rounded-xl px-3 py-2 text-xs outline-none ${
+                    isLight ? 'bg-slate-50 border-slate-200 focus:border-[#154273]' : 'bg-[#08101d] border-[#1e334d] focus:border-blue-500'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold mb-1 opacity-80">
+                  E-mailadres (voor PDF rapportages en notificaties)
+                </label>
+                <input
+                  type="email"
+                  value={formData.email || ''}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  placeholder="j.vandenberg@marechaussee.nl"
                   className={`w-full border rounded-xl px-3 py-2 text-xs outline-none ${
                     isLight ? 'bg-slate-50 border-slate-200 focus:border-[#154273]' : 'bg-[#08101d] border-[#1e334d] focus:border-blue-500'
                   }`}

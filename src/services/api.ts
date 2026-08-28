@@ -289,6 +289,37 @@ export class ApiService {
   // ----------------------------------------------------------------------------
   // OFFICER PROFILE & PERSONAL MUTATIONS
   // ----------------------------------------------------------------------------
+  public static async getUserProfile(): Promise<any> {
+    const res = await fetch('/api/user/profile', {
+      headers: this.getHeaders(),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Fout bij ophalen profiel');
+    return json.data;
+  }
+
+  public static async updateUserProfile(data: {
+    email?: string;
+    name?: string;
+    department?: string;
+    currentPassword?: string;
+    newPassword?: string;
+  }): Promise<UserSession> {
+    const res = await fetch('/api/user/profile', {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Fout bij bijwerken profiel');
+    
+    // Update local session state
+    if (json.data) {
+      this.setUserSession(json.data);
+    }
+    return json.data;
+  }
+
   public static async getOfficerMutations(badgeNumber: string): Promise<{
     mutations: MutationRecord[];
     stats: {
@@ -414,11 +445,11 @@ export class ApiService {
   }
 
   
-  public static async emailDossier(id: string, pdfData: string): Promise<any> {
+  public static async emailDossier(id: string, pdfData: string, email?: string): Promise<any> {
     const res = await fetch(`/api/mutations/${id}/email`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ pdfData }),
+      body: JSON.stringify({ pdfData, email }),
     });
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || 'E-mailen van dossier mislukt');
